@@ -1,0 +1,27 @@
+##############################################################
+#
+# 计算节点的配置:
+# HOST_IP 为主控节点的IP
+# MY_IP 为本节点IP
+#
+# 需要注意的是NOVNCPROXY_BASE_URL这个参数,因为通常来讲所有的
+# 机器会放在防火墙的后面,做NAT出去,此时要额外设置
+# NOVNCPROXY_BASE_URL中的HOST_IP设置为地址转换后的外网地址.
+#
+# MY_IP 设置为本机的内网IP
+#
+##############################################################
+
+HOST_IP=10.0.3.20
+MY_IP=127.0.0.1
+
+DATABASE_USER=root
+DATABASE_PASSWORD=tang
+MYSQL_HOST=$HOST_IP
+AUTO_VNC_HOST=$HOST_IP #注意:修改这个,请按照说明修改这个
+
+BASE_SQL_CONN=mysql://$DATABASE_USER:$DATABASE_PASSWORD@$HOST_IP
+NOVNCPROXY_BASE_URL=http://$AUTO_VNC_HOST:6080/vnc_auto.html
+
+RABBIT_HOST=$HOST_IP
+RABBIT_PASSWORD=guest

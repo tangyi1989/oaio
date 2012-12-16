@@ -1,0 +1,93 @@
+
+# Dependencies:
+# ``functions`` file
+# ``BASE_SQL_CONN``
+# ``SERVICE_HOST``
+# ``SERVICE_TOKEN``
+
+########################### SETTINGS #################################
+
+# Set up default directories
+KEYSTONE_DIR=$DEST/keystone
+KEYSTONE_CONF_DIR=${KEYSTONE_CONF_DIR:-/etc/keystone}
+KEYSTONE_CONF=$KEYSTONE_CONF_DIR/keystone.conf
+KEYSTONE_AUTH_CACHE_DIR=${KEYSTONE_AUTH_CACHE_DIR:-/var/cache/keystone}
+
+KEYSTONECLIENT_DIR=$DEST/python-keystoneclient
+
+# Select the backend for Keystone's service catalog
+KEYSTONE_CATALOG_BACKEND=${KEYSTONE_CATALOG_BACKEND:-sql}
+KEYSTONE_CATALOG=$KEYSTONE_CONF_DIR/default_catalog.templates
+
+# Select Keystone's token format
+# Choose from 'UUID' and 'PKI'
+KEYSTONE_TOKEN_FORMAT=${KEYSTONE_TOKEN_FORMAT:-UUID}
+
+# Set Keystone interface configuration
+KEYSTONE_API_PORT=${KEYSTONE_API_PORT:-5000}
+KEYSTONE_AUTH_HOST=${KEYSTONE_AUTH_HOST:-$SERVICE_HOST}
+KEYSTONE_AUTH_PORT=${KEYSTONE_AUTH_PORT:-35357}
+KEYSTONE_AUTH_PROTOCOL=${KEYSTONE_AUTH_PROTOCOL:-http}
+KEYSTONE_SERVICE_HOST=${KEYSTONE_SERVICE_HOST:-$SERVICE_HOST}
+KEYSTONE_SERVICE_PORT=${KEYSTONE_SERVICE_PORT:-5000}
+KEYSTONE_SERVICE_PROTOCOL=${KEYSTONE_SERVICE_PROTOCOL:-http}
+
+############################# FUNCTIONS #############################
+
+# configure_keystone() - Set config files, create data dirs, etc
+function configure_keystone() {
+
+    if [[ ! -d $KEYSTONE_CONF_DIR ]]; then
+        sudo mkdir -p $KEYSTONE_CONF_DIR
+    fi
+
+    if [[ "$KEYSTONE_CONF_DIR" != "$KEYSTONE_DIR/etc" ]]; then
+        cp -p $KEYSTONE_DIR/etc/keystone.conf.sample $KEYSTONE_CONF
+        cp -p $KEYSTONE_DIR/etc/policy.json $KEYSTONE_CONF_DIR
+    fi
+
+    # Rewrite stock ``keystone.conf``
+    local dburl
+    database_connection_url dburl keystone
+    iniset $KEYSTONE_CONF DEFAULT admin_token "$SERVICE_TOKEN"
+    iniset $KEYSTONE_CONF signing token_format "$KEYSTONE_TOKEN_FORMAT"
+    iniset $KEYSTONE_CONF sql connection $dburl
+    iniset $KEYSTONE_CONF ec2 driver "keystone.contrib.ec2.backends.sql.Ec2"
+    sed -e "
+        /^pipeline.*ec2_extension crud_/s|ec2_extension crud_extension|ec2_extension s3_extension crud_extension|;
+    " -i $KEYSTONE_CONF
+
+    # Configure ``keystone.conf`` to use sql
+    iniset $KEYSTONE_CONF catalog driver keystone.catalog.backends.sql.Catalog
+    inicomment $KEYSTONE_CONF catalog template_file
+
+    # Set up logging
+    LOGGING_ROOT="$LOGGING_ROOT,production"
+    KEYSTONE_LOG_CONFIG="--log-config $KEYSTONE_CONF_DIR/logging.conf"
+    cp $KEYSTONE_DIR/etc/logging.conf.sample $KEYSTONE_CONF_DIR/logging.conf
+    iniset $KEYSTONE_CONF_DIR/logging.conf logger_root level "DEBUG"
+    iniset $KEYSTONE_CONF_DIR/logging.conf logger_root handlers "devel,production"
+}
+
+# init_keystone() - Initialize databases, etc.
+function init_keystone() {
+    # (Re)create keystone database
+    recreate_database keystone utf8
+
+    # Initialize keystone database
+    keystone-manage db_sync
+}
+
+# service_keystone() - Keystone system level service config
+function service_keystone() {
+    if [[ ! -x '/etc/rc.d/init.d/openstack-keystone' ]]; then
+        chmod 755 /etc/rc.d/init.d/openstack-keystone
+
+        if [[ ! `chkconfig --list | grep 'openstack-keystone'` ]]; then
+            chkconfig --add openstack-keystone
+            chkconfig --level 35 openstack-keystone on
+        fi
+    fi
+
+    service openstack-keystone $1
+}

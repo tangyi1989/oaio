@@ -1,0 +1,140 @@
+
+############################### SETTINGS ##################################
+
+# Defaults
+# --------
+
+# <define global variables here that belong to this project>
+
+# Set up default directories
+GLANCE_DIR=/opt/stack/glance
+GLANCECLIENT_DIR=$DEST/python-glanceclient
+GLANCE_CACHE_DIR=${GLANCE_CACHE_DIR:=$DATA_DIR/glance/cache}
+GLANCE_IMAGE_DIR=${GLANCE_IMAGE_DIR:=$DATA_DIR/glance/images}
+GLANCE_AUTH_CACHE_DIR=${GLANCE_AUTH_CACHE_DIR:-/var/cache/glance}
+
+GLANCE_CONF_DIR=${GLANCE_CONF_DIR:-/etc/glance}
+GLANCE_REGISTRY_CONF=$GLANCE_CONF_DIR/glance-registry.conf
+GLANCE_API_CONF=$GLANCE_CONF_DIR/glance-api.conf
+GLANCE_REGISTRY_PASTE_INI=$GLANCE_CONF_DIR/glance-registry-paste.ini
+GLANCE_API_PASTE_INI=$GLANCE_CONF_DIR/glance-api-paste.ini
+GLANCE_CACHE_CONF=$GLANCE_CONF_DIR/glance-cache.conf
+GLANCE_POLICY_JSON=$GLANCE_CONF_DIR/policy.json
+
+# Support entry points installation of console scripts
+if [[ -d $GLANCE_DIR/bin ]]; then
+    GLANCE_BIN_DIR=$GLANCE_DIR/bin
+else
+    GLANCE_BIN_DIR=/opt/stack/glance/bin
+fi
+
+# Glance connection info. Note the port must be specified.
+GLANCE_HOSTPORT=${GLANCE_HOSTPORT:-$SERVICE_HOST:9292}
+
+################################# FUNCTIONS ##################################
+
+# configure_glance() - Set config files, create data dirs, etc
+function configure_glance() {
+
+    if [[ ! -d $GLANCE_CONF_DIR ]]; then
+        sudo mkdir -p $GLANCE_CONF_DIR
+    fi
+
+    # Copy over our glance configurations and update them
+    cp $GLANCE_DIR/etc/glance-registry.conf $GLANCE_REGISTRY_CONF
+    iniset $GLANCE_REGISTRY_CONF DEFAULT debug True
+    inicomment $GLANCE_REGISTRY_CONF DEFAULT log_file
+    local dburl
+    database_connection_url dburl glance
+    iniset $GLANCE_REGISTRY_CONF DEFAULT sql_connection $dburl
+
+    mkdir -p /var/log/glance
+    iniset $GLANCE_REGISTRY_CONF DEFAULT use_syslog False
+
+    iniset $GLANCE_REGISTRY_CONF paste_deploy flavor keystone
+    iniset $GLANCE_REGISTRY_CONF keystone_authtoken auth_host $KEYSTONE_AUTH_HOST
+    iniset $GLANCE_REGISTRY_CONF keystone_authtoken auth_port $KEYSTONE_AUTH_PORT
+    iniset $GLANCE_REGISTRY_CONF keystone_authtoken auth_protocol $KEYSTONE_AUTH_PROTOCOL
+    iniset $GLANCE_REGISTRY_CONF keystone_authtoken auth_uri $KEYSTONE_SERVICE_PROTOCOL://$KEYSTONE_SERVICE_HOST:$KEYSTONE_SERVICE_PORT/
+    iniset $GLANCE_REGISTRY_CONF keystone_authtoken admin_tenant_name admin
+    iniset $GLANCE_REGISTRY_CONF keystone_authtoken admin_user admin
+    iniset $GLANCE_REGISTRY_CONF keystone_authtoken admin_password $SERVICE_PASSWORD
+
+    cp $GLANCE_DIR/etc/glance-api.conf $GLANCE_API_CONF
+    iniset $GLANCE_API_CONF DEFAULT debug True
+    inicomment $GLANCE_API_CONF DEFAULT log_file
+    iniset $GLANCE_API_CONF DEFAULT sql_connection $dburl
+    iniset $GLANCE_API_CONF DEFAULT use_syslog False
+    iniset $GLANCE_API_CONF DEFAULT log_dir /var/log/glance/
+    iniset $GLANCE_API_CONF DEFAULT filesystem_store_datadir $GLANCE_IMAGE_DIR/
+    iniset $GLANCE_API_CONF DEFAULT image_cache_dir $GLANCE_CACHE_DIR/
+    iniset $GLANCE_API_CONF paste_deploy flavor keystone+cachemanagement
+    iniset $GLANCE_API_CONF keystone_authtoken auth_host $KEYSTONE_AUTH_HOST
+    iniset $GLANCE_API_CONF keystone_authtoken auth_port $KEYSTONE_AUTH_PORT
+    iniset $GLANCE_API_CONF keystone_authtoken auth_protocol $KEYSTONE_AUTH_PROTOCOL
+    iniset $GLANCE_API_CONF keystone_authtoken auth_uri $KEYSTONE_SERVICE_PROTOCOL://$KEYSTONE_SERVICE_HOST:$KEYSTONE_SERVICE_PORT/
+    iniset $GLANCE_API_CONF keystone_authtoken admin_tenant_name $SERVICE_TENANT_NAME
+    iniset $GLANCE_API_CONF keystone_authtoken admin_user nova
+    iniset $GLANCE_API_CONF keystone_authtoken admin_password $SERVICE_PASSWORD
+
+    cp -p $GLANCE_DIR/etc/glance-registry-paste.ini $GLANCE_REGISTRY_PASTE_INI
+    cp -p $GLANCE_DIR/etc/glance-api-paste.ini $GLANCE_API_PASTE_INI
+
+    cp $GLANCE_DIR/etc/glance-cache.conf $GLANCE_CACHE_CONF
+    iniset $GLANCE_CACHE_CONF DEFAULT debug True
+    inicomment $GLANCE_CACHE_CONF DEFAULT log_file
+    iniset $GLANCE_CACHE_CONF DEFAULT use_syslog $SYSLOG
+    iniset $GLANCE_CACHE_CONF DEFAULT filesystem_store_datadir $GLANCE_IMAGE_DIR/
+    iniset $GLANCE_CACHE_CONF DEFAULT image_cache_dir $GLANCE_CACHE_DIR/
+    iniuncomment $GLANCE_CACHE_CONF DEFAULT auth_url
+    iniset $GLANCE_CACHE_CONF DEFAULT auth_url $KEYSTONE_AUTH_PROTOCOL://$KEYSTONE_AUTH_HOST:$KEYSTONE_AUTH_PORT/v2.0
+    iniuncomment $GLANCE_CACHE_CONF DEFAULT auth_tenant_name
+    iniset $GLANCE_CACHE_CONF DEFAULT admin_tenant_name $SERVICE_TENANT_NAME
+    iniuncomment $GLANCE_CACHE_CONF DEFAULT auth_user
+    iniset $GLANCE_CACHE_CONF DEFAULT admin_user glance
+    iniuncomment $GLANCE_CACHE_CONF DEFAULT auth_password
+    iniset $GLANCE_CACHE_CONF DEFAULT admin_password $SERVICE_PASSWORD
+
+    cp -p $GLANCE_DIR/etc/policy.json $GLANCE_POLICY_JSON
+
+}
+
+# init_glance() - Initialize databases, etc.
+function init_glance() {
+    # Delete existing images
+    rm -rf $GLANCE_IMAGE_DIR
+    mkdir -p $GLANCE_IMAGE_DIR
+
+    # Delete existing cache
+    rm -rf $GLANCE_CACHE_DIR
+    mkdir -p $GLANCE_CACHE_DIR
+
+    # (re)create glance database
+    recreate_database glance utf8
+
+    $GLANCE_BIN_DIR/glance-manage db_sync
+}
+
+# service_glance() - Glance system level service config
+function service_glance() {
+    if [[ ! -x '/etc/rc.d/init.d/openstack-glance-api' ]]; then
+        chmod 755 /etc/rc.d/init.d/openstack-glance-api
+        
+        if [[ ! `chkconfig --list |grep 'openstack-glance-api'` ]]; then
+            chkconfig --add openstack-glance-api
+            chkconfig --level 35 openstack-glance-api on
+        fi
+    fi
+
+    if [[ ！-x '/etc/rc.d/init.d/openstack-glance-registry' ]]; then
+        chmod 755 /etc/rc.d/init.d/openstack-glance-registry
+
+        if [[ ! `chkconfig --list |grep 'openstack-glance-registry'` ]]; then
+            chkconfig --add openstack-glance-registry
+            chkconfig --level 35 openstack-glance-registry on
+        fi
+    fi
+
+    service openstack-glance-api $1
+    service openstack-glance-registry $1
+}

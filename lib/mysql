@@ -1,0 +1,85 @@
+#lib/mysql
+# Functions to control the configuration and operation of the MySQL database backend
+
+################################# Settings ####################################
+
+DATABASE_HOST=${MYSQL_HOST:-localhost}
+DATABASE_USER=${MYSQL_USER:-root}
+
+function recreate_database {
+    local db=$1
+    local charset=$2
+    mysql -u$DATABASE_USER -p$DATABASE_PASSWORD -e "DROP DATABASE IF EXISTS $db;"
+    mysql -u$DATABASE_USER -p$DATABASE_PASSWORD -e "CREATE DATABASE $db CHARACTER SET $charset;"
+}
+
+function configure_database_mysql {
+    #echo_summary "Configuring and starting MySQL"
+
+    MYSQL=mysqld
+    MY_CONF=/etc/my.cnf
+
+    # Start mysql-server
+    service $MYSQL start
+    # Set the root password - only works the first time
+    sudo mysqladmin -u root password $DATABASE_PASSWORD || true
+
+    # Update the DB to give user ‘$DATABASE_USER’@’%’ full control of the all databases:
+    sudo mysql -uroot -p$DATABASE_PASSWORD -h127.0.0.1 -e "GRANT ALL PRIVILEGES ON *.* TO '$DATABASE_USER'@'%' identified by '$DATABASE_PASSWORD';"
+
+    # Now update ``my.cnf`` for some local needs and restart the mysql service
+
+    # Change ‘bind-address’ from localhost (127.0.0.1) to any (0.0.0.0)
+    sudo sed -i '/^bind-address/s/127.0.0.1/0.0.0.0/g' $MY_CONF
+
+    # Set default db type to InnoDB
+    if sudo grep -q "default-storage-engine" $MY_CONF; then
+        # Change it
+        sudo bash -c "source $TOP_DIR/functions; iniset $MY_CONF mysqld default-storage-engine InnoDB"
+    else
+        # Add it
+        sudo sed -i -e "/^\[mysqld\]/ a \
+default-storage-engine = InnoDB" $MY_CONF
+    fi
+
+    service $MYSQL restart
+}
+
+
+function database_connection_url {
+    local output=$1
+    local db=$2
+    eval "$output=$BASE_SQL_CONN/$db?charset=utf8"
+}
+
+# Set the database type based on the configuration
+function initalize_mysql {
+    # For backward-compatibility, read in the MYSQL_HOST/USER variables and use
+    # them as the default values for the DATABASE_HOST/USER variables.
+    MYSQL_HOST=${MYSQL_HOST:-localhost}
+    MYSQL_USER=${MYSQL_USER:-root}
+
+    DATABASE_HOST=${DATABASE_HOST:-${MYSQL_HOST}}
+    DATABASE_USER=${DATABASE_USER:-${MYSQL_USER}}
+
+    if [ -n "$MYSQL_PASSWORD" ]; then
+        DATABASE_PASSWORD=$MYSQL_PASSWORD
+    else
+        read_password DATABASE_PASSWORD "ENTER A PASSWORD TO USE FOR THE DATABASE."
+    fi
+
+    # We configure Nova, Horizon, Glance and Keystone to use MySQL as their
+    # database server.  While they share a single server, each has their own
+    # database and tables.
+
+    # By default this script will install and configure MySQL.  If you want to
+    # use an existing server, you can pass in the user/password/host parameters.
+    # You will need to send the same ``DATABASE_PASSWORD`` to every host if you are doing
+    # a multi-node DevStack installation.
+
+    # NOTE: Don't specify ``/db`` in this string so we can use it for multiple services
+    BASE_SQL_CONN=${BASE_SQL_CONN:-mysql://$DATABASE_USER:$DATABASE_PASSWORD@$DATABASE_HOST}
+
+    return 0
+}
+

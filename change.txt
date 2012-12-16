@@ -1,0 +1,6 @@
+在lib下的nova文件添加service_nova函数
+在lib下的nova文件添加参数使默认网络模式问multi_host(227,228行)
+在lib下的glance文件添加service_glance函数
+在lib下的keystone文件添加service_keystone函数
+在functions文件添加general_service函数
+在install.sh调用service_nova、service_glance、service_keystone、general_service函数
