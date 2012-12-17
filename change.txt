@@ -1,6 +1,12 @@
+[2012-12-17] v1.2
 在lib下的nova文件添加service_nova函数
 在lib下的nova文件添加参数使默认网络模式问multi_host(227,228行)
 在lib下的glance文件添加service_glance函数
 在lib下的keystone文件添加service_keystone函数
 在functions文件添加general_service函数
 在install.sh调用service_nova、service_glance、service_keystone、general_service函数
+
+[2012-12-18]
+上传相应依赖软件包
+替换files/packages下软件包为launchpad.net下的正式发行版(nova-2012.2.2、glance-2012.2.1、keystone-2012.2.1)
+在rpms/virt/libvirt下添加dnsmasq-utils软件包
