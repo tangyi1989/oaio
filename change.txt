@@ -10,3 +10,4 @@
 上传相应依赖软件包
 替换files/packages下软件包为launchpad.net下的正式发行版(nova-2012.2.2、glance-2012.2.1、keystone-2012.2.1)
 在rpms/virt/libvirt下添加dnsmasq-utils软件包
+在空目录下放置.gitignore
